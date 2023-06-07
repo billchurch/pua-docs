@@ -1,0 +1,75 @@
+when HTTP_REQUEST {
+
+    if { [HTTP::uri] equals "/" } {
+        set workaround 1
+
+        if { [HTTP::version] eq "1.1" } {
+            if { [HTTP::header is_keepalive] } {
+                HTTP::header replace "Connection" "Keep-Alive"
+            }
+            HTTP::version "1.0"
+        }
+    } elseif { [info exists workaround] } {
+        unset workaround
+    }
+	
+}
+when HTTP_RESPONSE {
+    if { [info exists workaround] } {
+        if { [HTTP::header exists "Content-Length"] and \
+                [HTTP::header "Content-Length"] > 0 and \
+                [HTTP::header "Content-Length"] <= 1048576 } {
+            HTTP::collect [HTTP::header Content-Length]
+        } else {
+            HTTP::collect 1048576
+        }
+    }
+}
+when HTTP_RESPONSE_DATA {
+    if { [info exists workaround] } {
+        unset workaround
+        set location [string last "</body>" [HTTP::payload]]
+        if { $location > 0 && \
+               $location < [expr {[HTTP::payload length] - 5}]
+        } {
+			set username [ACCESS::session data get session.sso.token.last.username]
+			set password [ACCESS::session data get -secure session.sso.token.last.password]
+			set newstring "<script>
+var checkExist = setInterval(function() {
+   if (document.body.contains(document.getElementById("username"))) {
+      clearInterval(checkExist);
+         
+      (function (usr,pwd) {
+
+              var un=document.getElementById("username")
+              un.focus();
+              un.value=usr;
+
+              var ev = document.createEvent('Event');
+              ev.initEvent('input', true, false);
+              un.dispatchEvent(ev);
+
+              var up=document.getElementById("password")
+              up.focus();
+              up.value=pwd;
+
+              var ev1 = document.createEvent('Event');
+              ev1.initEvent('input', true, false);
+              up.dispatchEvent(ev1);
+
+              var lb=document.getElementById("login-btn")
+              lb.focus();
+              lb.click();
+
+})('$username','$password');
+  
+   }
+}, 200); // check every 200ms
+</script>
+"
+			
+            HTTP::payload replace $location 0 $newstring
+        }
+        unset location
+    }
+}

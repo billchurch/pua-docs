@@ -1,0 +1,50 @@
+# vRealize standalone vip iRule.
+# Needs an HTML profile and an HTML rule looking for tag "body"
+#
+# tmsh create ltm profile html html { app-service none content-selection { text/html text/xhtml } rules { script } }
+# tmsh create ltm html-rule tag-raise-event script { match { tag-name body } }
+
+when HTTP_REQUEST {
+  HTML::disable
+  if { [HTTP::uri] ends_with "/ui/login.action" } {
+  HTML::enable
+  log local0. "HIT LOGIN"
+  set workaround 1
+  } elseif { [info exists workaround] } {
+  unset workaround
+  }
+}
+
+when HTML_TAG_MATCHED {
+  log local0. "at HTML_TAG_MATCHED: [HTML::tag name]"
+  if { [info exists workaround] } {
+    switch [HTML::tag name] {
+      "body" {
+        log local0. "at body..."
+        set username [ACCESS::session data get session.sso.token.last.username]
+        set password [ACCESS::session data get -secure session.sso.token.last.password]
+        set newstring "<script> 
+    //Try this
+    document.addEventListener('DOMContentLoaded', (event) => {
+    console.log('DOM fully loaded and parsed');
+    });
+    
+    // F5 Patch
+    var checkExist = setInterval(function() {
+      if (document.body.contains(document.getElementById(\"authSelector-inputEl\"))) {
+        clearInterval(checkExist);
+		document.getElementById(\"authSelector-inputEl\").value = "PUA2";
+        document.getElementById(\"userName-inputEl\").value = \"$username\";
+        document.getElementById(\"password-inputEl\").value = \"$password\";
+        document.getElementById(\"loginBtn-btnInnerEl\").click();
+      }
+    }, 3000); // check every 3000ms
+    
+    </script>"
+        HTML::tag append $newstring
+        unset workaround
+        HTML::disable
+      }
+    }
+  }
+}
